@@ -1,12 +1,12 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
+ * contributor license agreements. See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * the License. You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,6 @@ package org.apache.kafka.common.requests;
 import org.apache.kafka.common.network.NetworkSend;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.ProtoUtils;
 import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
@@ -44,7 +43,7 @@ public abstract class AbstractRequest extends AbstractRequestResponse {
         }
 
         public short desiredOrLatestVersion() {
-            return desiredVersion == null ? ProtoUtils.latestVersion(apiKey.id) : desiredVersion;
+            return desiredVersion == null ? apiKey.latestVersion() : desiredVersion;
         }
 
         public T build() {
@@ -90,7 +89,7 @@ public abstract class AbstractRequest extends AbstractRequestResponse {
      */
     public static RequestAndSize getRequest(int requestId, short version, ByteBuffer buffer) {
         ApiKeys apiKey = ApiKeys.forId(requestId);
-        Struct struct = ProtoUtils.parseRequest(apiKey.id, version, buffer);
+        Struct struct = apiKey.parseRequest(version, buffer);
         AbstractRequest request;
         switch (apiKey) {
             case PRODUCE:

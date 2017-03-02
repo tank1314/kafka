@@ -1,10 +1,10 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
+ * contributor license agreements. See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * the License. You may obtain a copy of the License at
  *
  *    http://www.apache.org/licenses/LICENSE-2.0
  *
@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.perf;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -103,9 +102,8 @@ public class SimpleBenchmark {
 
     private static int numRecords;
     private static int processedRecords = 0;
-    private static final int KEY_SIZE = 8;
+    private static long processedBytes = 0;
     private static final int VALUE_SIZE = 100;
-    private static final int RECORD_SIZE = KEY_SIZE + VALUE_SIZE;
 
     private static final Serde<byte[]> BYTE_SERDE = Serdes.ByteArray();
     private static final Serde<Integer> INTEGER_SERDE = Serdes.Integer();
@@ -143,7 +141,7 @@ public class SimpleBenchmark {
                 kTableKTableJoin(JOIN_TOPIC_1_PREFIX + "KTableKTable", JOIN_TOPIC_2_PREFIX + "KTableKTable");
                 break;
             case "produce":
-                produce(SOURCE_TOPIC, VALUE_SIZE, "simple-benchmark-produce", numRecords, true, numRecords, true);
+                produce(SOURCE_TOPIC);
                 break;
             case "consume":
                 consume(SOURCE_TOPIC);
@@ -229,6 +227,7 @@ public class SimpleBenchmark {
     private boolean maybeSetupPhase(final String topic, final String clientId,
                                     final boolean skipIfAllTests) throws Exception {
         processedRecords = 0;
+        processedBytes = 0;
         // initialize topics
         if (loadPhase) {
             if (skipIfAllTests) {
@@ -339,7 +338,7 @@ public class SimpleBenchmark {
             processedRecords + "/" +
             latency + "/" +
             recordsPerSec(latency, processedRecords) + "/" +
-            megabytesPerSec(latency, processedRecords, RECORD_SIZE));
+            megabytesPerSec(latency, processedBytes));
     }
 
     private void runGenericBenchmark(final KafkaStreams streams, final String nameOfBenchmark, final CountDownLatch latch) {
@@ -445,7 +444,6 @@ public class SimpleBenchmark {
             return;
         }
         produce(topic, VALUE_SIZE, "simple-benchmark-produce", numRecords, true, numRecords, true);
-
     }
     /**
      * Produce values to a topic
@@ -459,9 +457,10 @@ public class SimpleBenchmark {
      *                   when this produce step is part of another benchmark that produces its own stats
      */
     private void produce(String topic, int valueSizeBytes, String clientId, int numRecords, boolean sequential,
-                        int upperRange, boolean printStats) throws Exception {
+                         int upperRange, boolean printStats) throws Exception {
 
-
+        processedRecords = 0;
+        processedBytes = 0;
         if (sequential) {
             if (upperRange < numRecords) throw new Exception("UpperRange must be >= numRecords");
         }
@@ -475,6 +474,10 @@ public class SimpleBenchmark {
         KafkaProducer<Integer, byte[]> producer = new KafkaProducer<>(props);
 
         byte[] value = new byte[valueSizeBytes];
+        // put some random values to increase entropy. Some devices
+        // like SSDs do compression and if the array is all zeros
+        // the performance will be too good.
+        new Random().nextBytes(value);
         long startTime = System.currentTimeMillis();
 
         if (sequential) key = 0;
@@ -483,22 +486,19 @@ public class SimpleBenchmark {
             producer.send(new ProducerRecord<>(topic, key, value));
             if (sequential) key++;
             else key = rand.nextInt(upperRange);
+            processedRecords++;
+            processedBytes += value.length + Integer.SIZE;
         }
         producer.close();
 
         long endTime = System.currentTimeMillis();
 
         if (printStats) {
-            System.out.println("Producer Performance [records/latency/rec-sec/MB-sec write]: " +
-                numRecords + "/" +
-                (endTime - startTime) + "/" +
-                recordsPerSec(endTime - startTime, numRecords) + "/" +
-                megabytesPerSec(endTime - startTime, numRecords, KEY_SIZE + valueSizeBytes));
+            printResults("Producer Performance [records/latency/rec-sec/MB-sec write]: ", endTime - startTime);
         }
     }
 
     public void consume(String topic) throws Exception {
-        int consumedRecords = 0;
         if (maybeSetupPhase(topic, "simple-benchmark-consumer-load", true)) {
             return;
         }
@@ -518,30 +518,27 @@ public class SimpleBenchmark {
         while (true) {
             ConsumerRecords<Integer, byte[]> records = consumer.poll(500);
             if (records.isEmpty()) {
-                if (consumedRecords == numRecords)
+                if (processedRecords == numRecords)
                     break;
             } else {
                 for (ConsumerRecord<Integer, byte[]> record : records) {
-                    consumedRecords++;
+                    processedRecords++;
+                    processedBytes += record.value().length + Integer.SIZE;
                     Integer recKey = record.key();
                     if (key == null || key < recKey)
                         key = recKey;
-                    if (consumedRecords == numRecords)
+                    if (processedRecords == numRecords)
                         break;
                 }
             }
-            if (consumedRecords == numRecords)
+            if (processedRecords == numRecords)
                 break;
         }
 
         long endTime = System.currentTimeMillis();
 
         consumer.close();
-        System.out.println("Consumer Performance [records/latency/rec-sec/MB-sec read]: " +
-            consumedRecords + "/" +
-            (endTime - startTime) + "/" +
-            recordsPerSec(endTime - startTime, consumedRecords) + "/" +
-            megabytesPerSec(endTime - startTime, consumedRecords, RECORD_SIZE));
+        printResults("Consumer Performance [records/latency/rec-sec/MB-sec read]: ", endTime - startTime);
     }
 
     private KafkaStreams createKafkaStreams(String topic, final CountDownLatch latch) {
@@ -563,6 +560,7 @@ public class SimpleBenchmark {
                     @Override
                     public void process(Integer key, byte[] value) {
                         processedRecords++;
+                        processedBytes += value.length + Integer.SIZE;
                         if (processedRecords == numRecords) {
                             latch.countDown();
                         }
@@ -601,6 +599,7 @@ public class SimpleBenchmark {
                     @Override
                     public void process(Integer key, byte[] value) {
                         processedRecords++;
+                        processedBytes += value.length + Integer.SIZE;
                         if (processedRecords == numRecords) {
                             latch.countDown();
                         }
@@ -628,6 +627,13 @@ public class SimpleBenchmark {
         @Override
         public void apply(Integer key, V value) {
             processedRecords++;
+            if (value instanceof byte[]) {
+                processedBytes += ((byte[]) value).length + Integer.SIZE;
+            } else if (value instanceof Long) {
+                processedBytes += Long.SIZE + Integer.SIZE;
+            } else {
+                System.err.println("Unknown value type in CountDownAction");
+            }
             if (processedRecords == numRecords) {
                 this.latch.countDown();
             }
@@ -701,6 +707,7 @@ public class SimpleBenchmark {
                     public void process(Integer key, byte[] value) {
                         store.put(key, value);
                         processedRecords++;
+                        processedBytes += value.length + Integer.SIZE;
                         if (processedRecords == numRecords) {
                             latch.countDown();
                         }
@@ -720,13 +727,12 @@ public class SimpleBenchmark {
         return new KafkaStreams(builder, props);
     }
 
-
-    private double megabytesPerSec(long time, int numRecords, int recordSizeBytes) {
-        return  ((double) recordSizeBytes * numRecords / 1024 / 1024) / (time / 1000.0);
+    private double megabytesPerSec(long time, long processedBytes) {
+        return  (processedBytes / 1024.0 / 1024.0) / (time / 1000.0);
     }
 
     private double recordsPerSec(long time, int numRecords) {
-        return (double) numRecords / ((double) time / 1000);
+        return numRecords / (time / 1000.0);
     }
 
     private List<TopicPartition> getAllPartitions(KafkaConsumer<?, ?> consumer, String... topics) {

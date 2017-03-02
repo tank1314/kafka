@@ -1,13 +1,12 @@
-/**
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.common.requests;
 
 import java.nio.ByteBuffer;
@@ -24,7 +22,6 @@ import java.util.List;
 
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.ProtoUtils;
 import org.apache.kafka.common.protocol.types.Struct;
 
 
@@ -44,7 +41,7 @@ public class SaslHandshakeRequest extends AbstractRequest {
     private final String mechanism;
 
     public SaslHandshakeRequest(String mechanism) {
-        super(ProtoUtils.latestVersion(ApiKeys.SASL_HANDSHAKE.id));
+        super(ApiKeys.SASL_HANDSHAKE.latestVersion());
         this.mechanism = mechanism;
     }
 
@@ -66,17 +63,17 @@ public class SaslHandshakeRequest extends AbstractRequest {
                 return new SaslHandshakeResponse(Errors.forException(e), enabledMechanisms);
             default:
                 throw new IllegalArgumentException(String.format("Version %d is not valid. Valid versions for %s are 0 to %d",
-                        versionId, this.getClass().getSimpleName(), ProtoUtils.latestVersion(ApiKeys.SASL_HANDSHAKE.id)));
+                        versionId, this.getClass().getSimpleName(), ApiKeys.SASL_HANDSHAKE.latestVersion()));
         }
     }
 
-    public static SaslHandshakeRequest parse(ByteBuffer buffer, short versionId) {
-        return new SaslHandshakeRequest(ProtoUtils.parseRequest(ApiKeys.SASL_HANDSHAKE.id, versionId, buffer), versionId);
+    public static SaslHandshakeRequest parse(ByteBuffer buffer, short version) {
+        return new SaslHandshakeRequest(ApiKeys.SASL_HANDSHAKE.parseRequest(version, buffer), version);
     }
 
     @Override
     protected Struct toStruct() {
-        Struct struct = new Struct(ProtoUtils.requestSchema(ApiKeys.SASL_HANDSHAKE.id, version()));
+        Struct struct = new Struct(ApiKeys.SASL_HANDSHAKE.requestSchema(version()));
         struct.set(MECHANISM_KEY_NAME, mechanism);
         return struct;
     }

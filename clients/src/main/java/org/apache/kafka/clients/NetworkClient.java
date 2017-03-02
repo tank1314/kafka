@@ -1,14 +1,18 @@
-/**
- * Licensed to the Apache Software Foundation (ASF) under one or more contributor license agreements. See the NOTICE
- * file distributed with this work for additional information regarding copyright ownership. The ASF licenses this file
- * to You under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the
- * License. You may obtain a copy of the License at
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
- * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.apache.kafka.clients;
 
@@ -20,7 +24,6 @@ import org.apache.kafka.common.network.Selectable;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.ProtoUtils;
 import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.requests.AbstractResponse;
@@ -314,12 +317,12 @@ public class NetworkClient implements KafkaClient {
         String nodeId = clientRequest.destination();
         RequestHeader header = clientRequest.makeHeader(request.version());
         if (log.isDebugEnabled()) {
-            int latestClientVersion = ProtoUtils.latestVersion(clientRequest.apiKey().id);
+            int latestClientVersion = clientRequest.apiKey().latestVersion();
             if (header.apiVersion() == latestClientVersion) {
-                log.trace("Sending {} to node {}.", request, nodeId);
+                log.trace("Sending {} {} to node {}.", clientRequest.apiKey(), request, nodeId);
             } else {
-                log.debug("Using older server API v{} to send {} to node {}.",
-                        header.apiVersion(), request, nodeId);
+                log.debug("Using older server API v{} to send {} {} to node {}.",
+                        header.apiVersion(), clientRequest.apiKey(), request, nodeId);
             }
         }
         Send send = request.toSend(nodeId, header);
@@ -330,6 +333,7 @@ public class NetworkClient implements KafkaClient {
                 clientRequest.callback(),
                 clientRequest.expectResponse(),
                 isInternalRequest,
+                request,
                 send,
                 now);
         this.inFlightRequests.add(inFlightRequest);
@@ -453,9 +457,8 @@ public class NetworkClient implements KafkaClient {
     public static AbstractResponse parseResponse(ByteBuffer responseBuffer, RequestHeader requestHeader) {
         ResponseHeader responseHeader = ResponseHeader.parse(responseBuffer);
         // Always expect the response version id to be the same as the request version id
-        short apiKey = requestHeader.apiKey();
-        short apiVer = requestHeader.apiVersion();
-        Struct responseBody = ProtoUtils.responseSchema(apiKey, apiVer).read(responseBuffer);
+        ApiKeys apiKey = ApiKeys.forId(requestHeader.apiKey());
+        Struct responseBody = apiKey.responseSchema(requestHeader.apiVersion()).read(responseBuffer);
         correlate(requestHeader, responseHeader);
         return AbstractResponse.getResponse(apiKey, responseBody);
     }
@@ -472,7 +475,7 @@ public class NetworkClient implements KafkaClient {
         nodeApiVersions.remove(nodeId);
         nodesNeedingApiVersionsFetch.remove(nodeId);
         for (InFlightRequest request : this.inFlightRequests.clearAll(nodeId)) {
-            log.trace("Cancelled request {} due to node {} being disconnected", request, nodeId);
+            log.trace("Cancelled request {} due to node {} being disconnected", request.request, nodeId);
             if (request.isInternalRequest && request.header.apiKey() == ApiKeys.METADATA.id)
                 metadataUpdater.handleDisconnection(request.destination);
             else
@@ -798,6 +801,7 @@ public class NetworkClient implements KafkaClient {
         final String destination;
         final RequestCompletionHandler callback;
         final boolean expectResponse;
+        final AbstractRequest request;
         final boolean isInternalRequest; // used to flag requests which are initiated internally by NetworkClient
         final Send send;
         final long sendTimeMs;
@@ -809,6 +813,7 @@ public class NetworkClient implements KafkaClient {
                                RequestCompletionHandler callback,
                                boolean expectResponse,
                                boolean isInternalRequest,
+                               AbstractRequest request,
                                Send send,
                                long sendTimeMs) {
             this.header = header;
@@ -816,6 +821,7 @@ public class NetworkClient implements KafkaClient {
             this.callback = callback;
             this.expectResponse = expectResponse;
             this.isInternalRequest = isInternalRequest;
+            this.request = request;
             this.send = send;
             this.sendTimeMs = sendTimeMs;
             this.createdTimeMs = createdTimeMs;

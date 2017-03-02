@@ -1,10 +1,10 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
+ * contributor license agreements. See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * the License. You may obtain a copy of the License at
  *
  *    http://www.apache.org/licenses/LICENSE-2.0
  *
@@ -22,7 +22,6 @@ import org.apache.kafka.common.network.MultiSend;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.ProtoUtils;
 
 import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.protocol.types.Type;
@@ -158,7 +157,7 @@ public class FetchResponse extends AbstractResponse {
     }
 
     public static FetchResponse parse(ByteBuffer buffer, short version) {
-        return new FetchResponse(ProtoUtils.responseSchema(ApiKeys.FETCH.id, version).read(buffer));
+        return new FetchResponse(ApiKeys.FETCH.responseSchema(version).read(buffer));
     }
 
     private static void addResponseData(Struct struct, int throttleTimeMs, String dest, List<Send> sends) {
@@ -212,7 +211,7 @@ public class FetchResponse extends AbstractResponse {
     }
 
     private static Struct toStruct(short version, LinkedHashMap<TopicPartition, PartitionData> responseData, int throttleTime) {
-        Struct struct = new Struct(ProtoUtils.responseSchema(ApiKeys.FETCH.id, version));
+        Struct struct = new Struct(ApiKeys.FETCH.responseSchema(version));
         List<FetchRequest.TopicAndPartitionData<PartitionData>> topicsData = FetchRequest.TopicAndPartitionData.batchByTopic(responseData);
         List<Struct> topicArray = new ArrayList<>();
         for (FetchRequest.TopicAndPartitionData<PartitionData> topicEntry: topicsData) {
