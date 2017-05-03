@@ -134,6 +134,10 @@ public class Struct {
         return (Integer) get(name);
     }
 
+    public Long getUnsignedInt(String name) {
+        return (Long) get(name);
+    }
+
     public Long getLong(Field field) {
         return (Long) get(field);
     }
@@ -349,7 +353,7 @@ public class Struct {
             } else {
                 Object thisField = this.get(f);
                 Object otherField = other.get(f);
-                result = (thisField == null && otherField == null) || thisField.equals(otherField);
+                return (thisField == null) ? (otherField == null) : thisField.equals(otherField);
             }
             if (!result)
                 return false;

@@ -19,6 +19,7 @@ package org.apache.kafka.common.requests;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.errors.InvalidMetadataException;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.protocol.types.Struct;
@@ -34,6 +35,7 @@ import java.util.Set;
 
 public class MetadataResponse extends AbstractResponse {
 
+    private static final String THROTTLE_TIME_KEY_NAME = "throttle_time_ms";
     private static final String BROKERS_KEY_NAME = "brokers";
     private static final String TOPIC_METADATA_KEY_NAME = "topic_metadata";
 
@@ -79,6 +81,7 @@ public class MetadataResponse extends AbstractResponse {
     private static final String REPLICAS_KEY_NAME = "replicas";
     private static final String ISR_KEY_NAME = "isr";
 
+    private final int throttleTimeMs;
     private final Collection<Node> brokers;
     private final Node controller;
     private final List<TopicMetadata> topicMetadata;
@@ -88,6 +91,11 @@ public class MetadataResponse extends AbstractResponse {
      * Constructor for all versions.
      */
     public MetadataResponse(List<Node> brokers, String clusterId, int controllerId, List<TopicMetadata> topicMetadata) {
+        this(DEFAULT_THROTTLE_TIME, brokers, clusterId, controllerId, topicMetadata);
+    }
+
+    public MetadataResponse(int throttleTimeMs, List<Node> brokers, String clusterId, int controllerId, List<TopicMetadata> topicMetadata) {
+        this.throttleTimeMs = throttleTimeMs;
         this.brokers = brokers;
         this.controller = getControllerNode(controllerId, brokers);
         this.topicMetadata = topicMetadata;
@@ -95,6 +103,7 @@ public class MetadataResponse extends AbstractResponse {
     }
 
     public MetadataResponse(Struct struct) {
+        this.throttleTimeMs = struct.hasField(THROTTLE_TIME_KEY_NAME) ? struct.getInt(THROTTLE_TIME_KEY_NAME) : DEFAULT_THROTTLE_TIME;
         Map<Integer, Node> brokers = new HashMap<>();
         Object[] brokerStructs = (Object[]) struct.get(BROKERS_KEY_NAME);
         for (Object brokerStruct : brokerStructs) {
@@ -178,6 +187,10 @@ public class MetadataResponse extends AbstractResponse {
         return null;
     }
 
+    public int throttleTimeMs() {
+        return throttleTimeMs;
+    }
+
     /**
      * Get a map of the topics which had metadata errors
      * @return the map
@@ -204,6 +217,29 @@ public class MetadataResponse extends AbstractResponse {
     }
 
     /**
+     * Returns the set of topics with an error indicating invalid metadata
+     * and topics with any partition whose error indicates invalid metadata.
+     * This includes all non-existent topics specified in the metadata request
+     * and any topic returned with one or more partitions whose leader is not known.
+     */
+    public Set<String> unavailableTopics() {
+        Set<String> invalidMetadataTopics = new HashSet<>();
+        for (TopicMetadata topicMetadata : this.topicMetadata) {
+            if (topicMetadata.error.exception() instanceof InvalidMetadataException)
+                invalidMetadataTopics.add(topicMetadata.topic);
+            else {
+                for (PartitionMetadata partitionMetadata : topicMetadata.partitionMetadata) {
+                    if (partitionMetadata.error.exception() instanceof InvalidMetadataException) {
+                        invalidMetadataTopics.add(topicMetadata.topic);
+                        break;
+                    }
+                }
+            }
+        }
+        return invalidMetadataTopics;
+    }
+
+    /**
      * Get a snapshot of the cluster metadata from this response
      * @return the cluster snapshot
      */
@@ -224,7 +260,8 @@ public class MetadataResponse extends AbstractResponse {
             }
         }
 
-        return new Cluster(this.clusterId, this.brokers, partitions, topicsByError(Errors.TOPIC_AUTHORIZATION_FAILED), internalTopics);
+        return new Cluster(this.clusterId, this.brokers, partitions, topicsByError(Errors.TOPIC_AUTHORIZATION_FAILED),
+                internalTopics, this.controller);
     }
 
     /**
@@ -341,6 +378,8 @@ public class MetadataResponse extends AbstractResponse {
     @Override
     protected Struct toStruct(short version) {
         Struct struct = new Struct(ApiKeys.METADATA.responseSchema(version));
+        if (struct.hasField(THROTTLE_TIME_KEY_NAME))
+            struct.set(THROTTLE_TIME_KEY_NAME, throttleTimeMs);
         List<Struct> brokerArray = new ArrayList<>();
         for (Node node : brokers) {
             Struct broker = struct.instance(BROKERS_KEY_NAME);

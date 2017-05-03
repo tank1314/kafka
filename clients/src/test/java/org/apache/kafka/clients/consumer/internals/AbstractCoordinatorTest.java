@@ -24,7 +24,7 @@ import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.AbstractRequest;
-import org.apache.kafka.common.requests.GroupCoordinatorResponse;
+import org.apache.kafka.common.requests.FindCoordinatorResponse;
 import org.apache.kafka.common.requests.HeartbeatRequest;
 import org.apache.kafka.common.requests.HeartbeatResponse;
 import org.apache.kafka.common.requests.JoinGroupRequest;
@@ -79,7 +79,7 @@ public class AbstractCoordinatorTest {
         Metrics metrics = new Metrics();
 
         Cluster cluster = TestUtils.singletonCluster("topic", 1);
-        metadata.update(cluster, mockTime.milliseconds());
+        metadata.update(cluster, Collections.<String>emptySet(), mockTime.milliseconds());
         this.node = cluster.nodes().get(0);
         mockClient.setNode(node);
 
@@ -466,8 +466,8 @@ public class AbstractCoordinatorTest {
         }, 3000, "Should have received a heartbeat request after joining the group");
     }
 
-    private GroupCoordinatorResponse groupCoordinatorResponse(Node node, Errors error) {
-        return new GroupCoordinatorResponse(error, node);
+    private FindCoordinatorResponse groupCoordinatorResponse(Node node, Errors error) {
+        return new FindCoordinatorResponse(error, node);
     }
 
     private HeartbeatResponse heartbeatResponse(Errors error) {
@@ -483,7 +483,7 @@ public class AbstractCoordinatorTest {
         return new SyncGroupResponse(error, ByteBuffer.allocate(0));
     }
 
-    public class DummyCoordinator extends AbstractCoordinator {
+    public static class DummyCoordinator extends AbstractCoordinator {
 
         private int onJoinPrepareInvokes = 0;
         private int onJoinCompleteInvokes = 0;
@@ -492,7 +492,7 @@ public class AbstractCoordinatorTest {
                                 Metrics metrics,
                                 Time time) {
             super(client, GROUP_ID, REBALANCE_TIMEOUT_MS, SESSION_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, metrics,
-                    METRIC_GROUP_PREFIX, time, RETRY_BACKOFF_MS);
+                  METRIC_GROUP_PREFIX, time, RETRY_BACKOFF_MS, false);
         }
 
         @Override

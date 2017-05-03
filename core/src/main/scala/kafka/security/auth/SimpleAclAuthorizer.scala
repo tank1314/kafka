@@ -56,10 +56,10 @@ object SimpleAclAuthorizer {
    * /kafka-acl/Group/group-1 => {"version": 1, "acls": [ { "host":"host1", "permissionType": "Allow","operation": "Read","principal": "User:alice"}]}
    * </pre>
    */
-  val AclZkPath = "/kafka-acl"
+  val AclZkPath = ZkUtils.KafkaAclPath
 
   //notification node which gets updated with the resource name when acl on a resource is changed.
-  val AclChangedZkPath = "/kafka-acl-changes"
+  val AclChangedZkPath = ZkUtils.KafkaAclChangesPath
 
   //prefix of all the change notification sequence node.
   val AclChangedPrefix = "acl_changes_"
@@ -109,7 +109,7 @@ class SimpleAclAuthorizer extends Authorizer with Logging {
     zkUtils = ZkUtils(zkUrl,
                       sessionTimeout = zkSessionTimeOutMs,
                       connectionTimeout = zkConnectionTimeoutMs,
-                      JaasUtils.isZkSecurityEnabled())
+                      kafkaConfig.zkEnableSecureAcls)
     zkUtils.makeSurePersistentPathExists(SimpleAclAuthorizer.AclZkPath)
 
     loadCache()

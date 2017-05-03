@@ -307,8 +307,8 @@ object AdminUtils extends Logging with AdminUtilities {
       if (brokerList.size != brokerList.toSet.size)
         throw new AdminOperationException("duplicate brokers in replica assignment: " + brokerList)
       if (checkBrokerAvailable && !brokerList.toSet.subsetOf(availableBrokerList))
-        throw new AdminOperationException("some specified brokers not available. specified brokers: " + brokerList.toString +
-          "available broker:" + availableBrokerList.toString)
+        throw new AdminOperationException("some specified brokers not available. specified brokers: " + brokerList +
+          "available broker:" + availableBrokerList)
       ret.put(partitionId, brokerList.toList)
       if (ret(partitionId).size != ret(startPartitionId).size)
         throw new AdminOperationException("partition " + i + " has different replication factor: " + brokerList)
@@ -565,9 +565,9 @@ object AdminUtils extends Logging with AdminUtilities {
     writeEntityConfig(zkUtils, entityConfigPath, configs)
 
     // create the change notification
-    val seqNode = ZkUtils.EntityConfigChangesPath + "/" + EntityConfigChangeZnodePrefix
+    val seqNode = ZkUtils.ConfigChangesPath + "/" + EntityConfigChangeZnodePrefix
     val content = Json.encode(getConfigChangeZnodeData(sanitizedEntityPath))
-    zkUtils.zkClient.createPersistentSequential(seqNode, content)
+    zkUtils.createSequentialPersistentPath(seqNode, content)
   }
 
   def getConfigChangeZnodeData(sanitizedEntityPath: String) : Map[String, Any] = {
@@ -588,7 +588,8 @@ object AdminUtils extends Logging with AdminUtilities {
    */
   def fetchEntityConfig(zkUtils: ZkUtils, rootEntityType: String, sanitizedEntityName: String): Properties = {
     val entityConfigPath = getEntityConfigPath(rootEntityType, sanitizedEntityName)
-    val str: String = zkUtils.zkClient.readData(entityConfigPath, true)
+    // readDataMaybeNull returns Some(null) if the path exists, but there is no data
+    val str: String = zkUtils.readDataMaybeNull(entityConfigPath)._1.orNull
     val props = new Properties()
     if (str != null) {
       Json.parseFull(str) match {

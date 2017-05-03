@@ -34,6 +34,7 @@ import org.apache.kafka.test.TestUtils;
 import java.io.File;
 import java.util.Collections;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 public class BrokerCompatibilityTest {
 
@@ -57,12 +58,24 @@ public class BrokerCompatibilityTest {
         streamsProperties.put(StreamsConfig.KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         streamsProperties.put(StreamsConfig.VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         streamsProperties.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100);
+        final int timeout = 6000;
+        streamsProperties.put(StreamsConfig.consumerPrefix(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG), timeout);
+        streamsProperties.put(StreamsConfig.consumerPrefix(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG), timeout);
+        streamsProperties.put(StreamsConfig.REQUEST_TIMEOUT_MS_CONFIG, timeout + 1);
 
 
         final KStreamBuilder builder = new KStreamBuilder();
         builder.stream(SOURCE_TOPIC).to(SINK_TOPIC);
 
         final KafkaStreams streams = new KafkaStreams(builder, streamsProperties);
+        streams.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override
+            public void uncaughtException(Thread t, Throwable e) {
+                System.out.println("FATAL: An unexpected exception is encountered on thread " + t + ": " + e);
+
+                streams.close(30, TimeUnit.SECONDS);
+            }
+        });
         System.out.println("start Kafka Streams");
         streams.start();
 

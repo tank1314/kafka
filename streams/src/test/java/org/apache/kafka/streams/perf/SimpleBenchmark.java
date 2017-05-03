@@ -54,6 +54,7 @@ import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.Properties;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Class that provides support for a series of benchmarks. It is usually driven by
@@ -104,6 +105,9 @@ public class SimpleBenchmark {
     private static int processedRecords = 0;
     private static long processedBytes = 0;
     private static final int VALUE_SIZE = 100;
+    private static final long POLL_MS = 500L;
+    private static final int MAX_POLL_RECORDS = 1000;
+    private static final int SOCKET_SIZE_BYTES = 1 * 1024 * 1024;
 
     private static final Serde<byte[]> BYTE_SERDE = Serdes.ByteArray();
     private static final Serde<Integer> INTEGER_SERDE = Serdes.Integer();
@@ -207,8 +211,13 @@ public class SimpleBenchmark {
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, kafka);
         props.put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, 1);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        // the socket buffer needs to be large, especially when running in AWS with
+        // high latency. if running locally the default is fine.
+        props.put(ConsumerConfig.RECEIVE_BUFFER_CONFIG, SOCKET_SIZE_BYTES);
         props.put(StreamsConfig.KEY_SERDE_CLASS_CONFIG, Serdes.Integer().getClass());
         props.put(StreamsConfig.VALUE_SERDE_CLASS_CONFIG, Serdes.ByteArray().getClass());
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, MAX_POLL_RECORDS);
+        props.put(StreamsConfig.POLL_MS_CONFIG, POLL_MS);
         return props;
     }
 
@@ -218,9 +227,16 @@ public class SimpleBenchmark {
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, IntegerSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
+        // the socket buffer needs to be large, especially when running in AWS with
+        // high latency. if running locally the default is fine.
+        props.put(ProducerConfig.SEND_BUFFER_CONFIG, SOCKET_SIZE_BYTES);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        // the socket buffer needs to be large, especially when running in AWS with
+        // high latency. if running locally the default is fine.
+        props.put(ConsumerConfig.RECEIVE_BUFFER_CONFIG, SOCKET_SIZE_BYTES);
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, MAX_POLL_RECORDS);
         return props;
     }
 
@@ -516,7 +532,7 @@ public class SimpleBenchmark {
         long startTime = System.currentTimeMillis();
 
         while (true) {
-            ConsumerRecords<Integer, byte[]> records = consumer.poll(500);
+            ConsumerRecords<Integer, byte[]> records = consumer.poll(POLL_MS);
             if (records.isEmpty()) {
                 if (processedRecords == numRecords)
                     break;
@@ -577,7 +593,7 @@ public class SimpleBenchmark {
             }
         });
 
-        return new KafkaStreams(builder, props);
+        return createKafkaStreamsWithExceptionHandler(builder, props);
     }
 
     private KafkaStreams createKafkaStreamsWithSink(String topic, final CountDownLatch latch) {
@@ -616,7 +632,7 @@ public class SimpleBenchmark {
             }
         });
 
-        return new KafkaStreams(builder, props);
+        return createKafkaStreamsWithExceptionHandler(builder, props);
     }
 
     private class CountDownAction<V> implements ForeachAction<Integer, V> {
@@ -649,7 +665,7 @@ public class SimpleBenchmark {
 
         input1.leftJoin(input2, VALUE_JOINER).foreach(new CountDownAction(latch));
 
-        return new KafkaStreams(builder, streamConfig);
+        return createKafkaStreamsWithExceptionHandler(builder, streamConfig);
     }
 
     private KafkaStreams createKafkaStreamsKTableKTableJoin(Properties streamConfig, String kTableTopic1,
@@ -661,7 +677,7 @@ public class SimpleBenchmark {
 
         input1.leftJoin(input2, VALUE_JOINER).foreach(new CountDownAction(latch));
 
-        return new KafkaStreams(builder, streamConfig);
+        return createKafkaStreamsWithExceptionHandler(builder, streamConfig);
     }
 
     private KafkaStreams createKafkaStreamsKStreamKStreamJoin(Properties streamConfig, String kStreamTopic1,
@@ -674,7 +690,7 @@ public class SimpleBenchmark {
 
         input1.leftJoin(input2, VALUE_JOINER, JoinWindows.of(timeDifferenceMs)).foreach(new CountDownAction(latch));
 
-        return new KafkaStreams(builder, streamConfig);
+        return createKafkaStreamsWithExceptionHandler(builder, streamConfig);
     }
 
     private KafkaStreams createKafkaStreamsWithStateStore(String topic,
@@ -724,9 +740,23 @@ public class SimpleBenchmark {
             }
         }, "store");
 
-        return new KafkaStreams(builder, props);
+        return createKafkaStreamsWithExceptionHandler(builder, props);
     }
 
+    private KafkaStreams createKafkaStreamsWithExceptionHandler(final KStreamBuilder builder, final Properties props) {
+        final KafkaStreams streamsClient = new KafkaStreams(builder, props);
+        streamsClient.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override
+            public void uncaughtException(Thread t, Throwable e) {
+                System.out.println("FATAL: An unexpected exception is encountered on thread " + t + ": " + e);
+
+                streamsClient.close(30, TimeUnit.SECONDS);
+            }
+        });
+
+        return streamsClient;
+    }
+    
     private double megabytesPerSec(long time, long processedBytes) {
         return  (processedBytes / 1024.0 / 1024.0) / (time / 1000.0);
     }

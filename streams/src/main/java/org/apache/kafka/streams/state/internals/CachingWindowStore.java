@@ -23,6 +23,7 @@ import org.apache.kafka.streams.kstream.internals.CacheFlushListener;
 import org.apache.kafka.streams.kstream.internals.TimeWindow;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
+import org.apache.kafka.streams.processor.internals.ProcessorStateManager;
 import org.apache.kafka.streams.processor.internals.RecordContext;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
@@ -38,6 +39,7 @@ class CachingWindowStore<K, V> extends WrappedStateStore.AbstractStateStore impl
     private final Serde<K> keySerde;
     private final Serde<V> valueSerde;
     private final long windowSize;
+    private final SegmentedBytesStore.KeySchema keySchema = new WindowKeySchema();
 
     private String name;
     private ThreadCache cache;
@@ -61,17 +63,18 @@ class CachingWindowStore<K, V> extends WrappedStateStore.AbstractStateStore impl
     public void init(final ProcessorContext context, final StateStore root) {
         underlying.init(context, root);
         initInternal(context);
+        keySchema.init(context.applicationId());
     }
 
     @SuppressWarnings("unchecked")
     private void initInternal(final ProcessorContext context) {
         this.context = (InternalProcessorContext) context;
-        this.serdes = new StateSerdes<>(underlying.name(),
-                                        keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
-                                        valueSerde == null ? (Serde<V>) context.valueSerde() : valueSerde);
+        serdes = new StateSerdes<>(ProcessorStateManager.storeChangelogTopic(context.applicationId(), underlying.name()),
+                                   keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
+                                   valueSerde == null ? (Serde<V>) context.valueSerde() : valueSerde);
 
-        this.name = context.taskId() + "-" + underlying.name();
-        this.cache = this.context.getCache();
+        name = context.taskId() + "-" + underlying.name();
+        cache = this.context.getCache();
 
         cache.addDirtyEntryFlushListener(name, new ThreadCache.DirtyEntryFlushListener() {
             @Override
@@ -149,11 +152,18 @@ class CachingWindowStore<K, V> extends WrappedStateStore.AbstractStateStore impl
         Bytes fromBytes = WindowStoreUtils.toBinaryKey(key, timeFrom, 0, serdes);
         Bytes toBytes = WindowStoreUtils.toBinaryKey(key, timeTo, 0, serdes);
 
-        final WindowStoreIterator<byte[]> underlyingIterator = underlying.fetch(Bytes.wrap(serdes.rawKey(key)), timeFrom, timeTo);
+        final Bytes keyBytes = Bytes.wrap(serdes.rawKey(key));
+        final WindowStoreIterator<byte[]> underlyingIterator = underlying.fetch(keyBytes, timeFrom, timeTo);
         final ThreadCache.MemoryLRUCacheBytesIterator cacheIterator = cache.range(name, fromBytes, toBytes);
-        return new MergedSortedCacheWindowStoreIterator<>(cacheIterator,
+
+        final HasNextCondition hasNextCondition = keySchema.hasNextCondition(keyBytes,
+                                                                             timeFrom,
+                                                                             timeTo);
+        final PeekingKeyValueIterator<Bytes, LRUCacheEntry> filteredCacheIterator = new FilteredCacheIterator(cacheIterator, hasNextCondition);
+
+        return new MergedSortedCacheWindowStoreIterator<>(filteredCacheIterator,
                                                           underlyingIterator,
-                                                          new StateSerdes<>(serdes.stateName(), Serdes.Long(), serdes.valueSerde()));
+                                                          new StateSerdes<>(serdes.topic(), Serdes.Long(), serdes.valueSerde()));
     }
 
     private V fetchPrevious(final Bytes key, final long timestamp) {

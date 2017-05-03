@@ -23,9 +23,11 @@ import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.InvalidStateStoreException;
 import org.apache.kafka.streams.errors.ProcessorStateException;
+import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateRestoreCallback;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.internals.ProcessorStateManager;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.RocksDBConfigSetter;
@@ -43,6 +45,8 @@ import org.rocksdb.WriteBatch;
 import org.rocksdb.WriteOptions;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -121,6 +125,10 @@ public class RocksDBStore<K, V> implements KeyValueStore<K, V> {
         options.setCreateIfMissing(true);
         options.setErrorIfExists(false);
         options.setInfoLogLevel(InfoLogLevel.ERROR_LEVEL);
+        // this is the recommended way to increase parallelism in RocksDb
+        // note that the current implementation increases the number of compaction threads
+        // but not flush threads.
+        options.setIncreaseParallelism(Runtime.getRuntime().availableProcessors());
 
         wOptions = new WriteOptions();
         wOptions.setDisableWAL(true);
@@ -136,12 +144,17 @@ public class RocksDBStore<K, V> implements KeyValueStore<K, V> {
         }
         // we need to construct the serde while opening DB since
         // it is also triggered by windowed DB segments without initialization
-        this.serdes = new StateSerdes<>(name,
-                keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
-                valueSerde == null ? (Serde<V>) context.valueSerde() : valueSerde);
+        this.serdes = new StateSerdes<>(
+            ProcessorStateManager.storeChangelogTopic(context.applicationId(), name),
+            keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
+            valueSerde == null ? (Serde<V>) context.valueSerde() : valueSerde);
 
         this.dbDir = new File(new File(context.stateDir(), parentDir), this.name);
-        this.db = openDB(this.dbDir, this.options, TTL_SECONDS);
+        try {
+            this.db = openDB(this.dbDir, this.options, TTL_SECONDS);
+        } catch (IOException e) {
+            throw new StreamsException(e);
+        }
     }
 
     public void init(ProcessorContext context, StateStore root) {
@@ -160,10 +173,10 @@ public class RocksDBStore<K, V> implements KeyValueStore<K, V> {
         open = true;
     }
 
-    private RocksDB openDB(File dir, Options options, int ttl) {
+    private RocksDB openDB(File dir, Options options, int ttl) throws IOException {
         try {
             if (ttl == TTL_NOT_USED) {
-                dir.getParentFile().mkdirs();
+                Files.createDirectories(dir.getParentFile().toPath());
                 return RocksDB.open(options, dir.getAbsolutePath());
             } else {
                 throw new UnsupportedOperationException("Change log is not supported for store " + this.name + " since it is TTL based.");

@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.common.utils;
 
+import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Comparator;
 
@@ -74,6 +75,8 @@ public class Bytes implements Comparable<Bytes> {
     public boolean equals(Object other) {
         if (this == other)
             return true;
+        if (other == null)
+            return false;
 
         // we intentionally use the function to compute hashcode here
         if (this.hashCode() != other.hashCode())
@@ -138,7 +141,7 @@ public class Bytes implements Comparable<Bytes> {
      */
     public final static Comparator<byte[]> BYTES_LEXICO_COMPARATOR = new LexicographicByteArrayComparator();
 
-    private interface ByteArrayComparator extends Comparator<byte[]> {
+    private interface ByteArrayComparator extends Comparator<byte[]>, Serializable {
 
         int compare(final byte[] buffer1, int offset1, int length1,
                     final byte[] buffer2, int offset2, int length2);
